@@ -1,352 +1,396 @@
 local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 
 local player = Players.LocalPlayer
-local character = player.Character or player.CharacterAdded:Wait()
-local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
-local humanoid = character:WaitForChild("Humanoid")
+local PlayerGui = player:WaitForChild("PlayerGui")
 
-local flySpeed = 50
+local FLY_SPEED = 50
+local BOOST_MULT = 1.4
 local flying = false
-local flyConnection = nil
-local bodyVelocity = nil
-local bodyGyro = nil
-local camera = workspace.CurrentCamera
+local bodyVelocity, bodyGyro
+local ControlModule
 
-player.CharacterAdded:Connect(function(char)
-	character = char
-	humanoidRootPart = char:WaitForChild("HumanoidRootPart")
-	humanoid = char:WaitForChild("Humanoid")
+pcall(function()
+	ControlModule = require(player:WaitForChild("PlayerScripts"):WaitForChild("PlayerModule")):GetControls()
 end)
 
-local function startFly()
-	if flying then return end
-	flying = true
-	humanoid.PlatformStand = true
-
-	bodyVelocity = Instance.new("BodyVelocity")
-	bodyVelocity.Velocity = Vector3.zero
-	bodyVelocity.MaxForce = Vector3.new(1e5, 1e5, 1e5)
-	bodyVelocity.Parent = humanoidRootPart
-
-	bodyGyro = Instance.new("BodyGyro")
-	bodyGyro.MaxTorque = Vector3.new(1e5, 1e5, 1e5)
-	bodyGyro.P = 1e4
-	bodyGyro.Parent = humanoidRootPart
-
-	flyConnection = RunService.Heartbeat:Connect(function()
-		if not flying then return end
-
-		local camCF = camera.CFrame
-		local moveDir = humanoid.MoveDirection
-
-		local forward = Vector3.new(camCF.LookVector.X, 0, camCF.LookVector.Z)
-		if forward.Magnitude > 0 then forward = forward.Unit end
-		local right = Vector3.new(camCF.RightVector.X, 0, camCF.RightVector.Z)
-		if right.Magnitude > 0 then right = right.Unit end
-
-		local velocity = Vector3.zero
-		if moveDir.Magnitude > 0 then
-			local localX = moveDir:Dot(Vector3.new(1, 0, 0))
-			local localZ = moveDir:Dot(Vector3.new(0, 0, 1))
-			velocity = (forward * -localZ + right * localX) * flySpeed
-		end
-
-		bodyVelocity.Velocity = velocity
-		bodyGyro.CFrame = camCF
-	end)
-end
-
-local function stopFly()
-	if not flying then return end
-	flying = false
-	humanoid.PlatformStand = false
-
-	if flyConnection then
-		flyConnection:Disconnect()
-		flyConnection = nil
-	end
-	if bodyVelocity then
-		bodyVelocity:Destroy()
-		bodyVelocity = nil
-	end
-	if bodyGyro then
-		bodyGyro:Destroy()
-		bodyGyro = nil
-	end
-end
-
 local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "SystemOverlay"
+screenGui.Name = "SystemHUD"
 screenGui.ResetOnSpawn = false
 screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 screenGui.IgnoreGuiInset = true
-screenGui.Parent = player.PlayerGui
+screenGui.Parent = PlayerGui
 
 local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0, 240, 0, 120)
-mainFrame.Position = UDim2.new(0, 20, 0.5, -60)
-mainFrame.BackgroundColor3 = Color3.fromRGB(12, 12, 14)
+mainFrame.Size = UDim2.new(0, 220, 0, 148)
+mainFrame.Position = UDim2.new(0.5, -110, 0.5, -74)
+mainFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
 mainFrame.BorderSizePixel = 0
+mainFrame.ClipsDescendants = false
 mainFrame.Active = true
 mainFrame.Parent = screenGui
 
-Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 18)
+local mainCorner = Instance.new("UICorner")
+mainCorner.CornerRadius = UDim.new(0, 16)
+mainCorner.Parent = mainFrame
 
 local mainStroke = Instance.new("UIStroke")
-mainStroke.Color = Color3.fromRGB(60, 60, 80)
-mainStroke.Thickness = 1
+mainStroke.Thickness = 2.5
+mainStroke.Color = Color3.fromRGB(255, 0, 0)
 mainStroke.Parent = mainFrame
 
-local quickBtn = Instance.new("TextButton")
-quickBtn.Size = UDim2.new(0, 36, 1, 0)
-quickBtn.Position = UDim2.new(0, 0, 0, 0)
-quickBtn.BackgroundColor3 = Color3.fromRGB(99, 82, 255)
-quickBtn.BorderSizePixel = 0
-quickBtn.Text = "⚡"
-quickBtn.TextSize = 16
-quickBtn.Font = Enum.Font.GothamBold
-quickBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-quickBtn.AutoButtonColor = false
-quickBtn.Parent = mainFrame
+local speedBar = Instance.new("Frame")
+speedBar.Size = UDim2.new(0, 220, 0, 44)
+speedBar.Position = UDim2.new(0, 0, 0, -52)
+speedBar.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+speedBar.BorderSizePixel = 0
+speedBar.Visible = false
+speedBar.Parent = mainFrame
 
-Instance.new("UICorner", quickBtn).CornerRadius = UDim.new(0, 18)
+local speedBarCorner = Instance.new("UICorner")
+speedBarCorner.CornerRadius = UDim.new(0, 12)
+speedBarCorner.Parent = speedBar
 
-local quickMask = Instance.new("Frame")
-quickMask.Size = UDim2.new(0, 18, 1, 0)
-quickMask.Position = UDim2.new(1, -18, 0, 0)
-quickMask.BackgroundColor3 = Color3.fromRGB(12, 12, 14)
-quickMask.BorderSizePixel = 0
-quickMask.ZIndex = 2
-quickMask.Parent = quickBtn
-
-local rightPanel = Instance.new("Frame")
-rightPanel.Size = UDim2.new(1, -36, 1, 0)
-rightPanel.Position = UDim2.new(0, 36, 0, 0)
-rightPanel.BackgroundTransparency = 1
-rightPanel.Parent = mainFrame
-
-local titleLabel = Instance.new("TextLabel")
-titleLabel.Size = UDim2.new(1, -50, 0, 28)
-titleLabel.Position = UDim2.new(0, 10, 0, 8)
-titleLabel.BackgroundTransparency = 1
-titleLabel.Text = "Fly"
-titleLabel.TextColor3 = Color3.fromRGB(200, 200, 220)
-titleLabel.TextSize = 13
-titleLabel.Font = Enum.Font.GothamSemibold
-titleLabel.TextXAlignment = Enum.TextXAlignment.Left
-titleLabel.Parent = rightPanel
-
-local collapseBtn = Instance.new("TextButton")
-collapseBtn.Size = UDim2.new(0, 26, 0, 26)
-collapseBtn.Position = UDim2.new(1, -54, 0, 6)
-collapseBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 36)
-collapseBtn.BorderSizePixel = 0
-collapseBtn.Text = "−"
-collapseBtn.TextSize = 15
-collapseBtn.Font = Enum.Font.GothamBold
-collapseBtn.TextColor3 = Color3.fromRGB(160, 160, 180)
-collapseBtn.AutoButtonColor = false
-collapseBtn.Parent = rightPanel
-Instance.new("UICorner", collapseBtn).CornerRadius = UDim.new(0, 8)
-
-local closeBtn = Instance.new("TextButton")
-closeBtn.Size = UDim2.new(0, 26, 0, 26)
-closeBtn.Position = UDim2.new(1, -26, 0, 6)
-closeBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 60)
-closeBtn.BorderSizePixel = 0
-closeBtn.Text = "×"
-closeBtn.TextSize = 15
-closeBtn.Font = Enum.Font.GothamBold
-closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-closeBtn.AutoButtonColor = false
-closeBtn.Parent = rightPanel
-Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 8)
-
-local controlsFrame = Instance.new("Frame")
-controlsFrame.Size = UDim2.new(1, -10, 0, 54)
-controlsFrame.Position = UDim2.new(0, 5, 0, 42)
-controlsFrame.BackgroundTransparency = 1
-controlsFrame.Parent = rightPanel
-
-local controlsLayout = Instance.new("UIListLayout")
-controlsLayout.FillDirection = Enum.FillDirection.Horizontal
-controlsLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-controlsLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-controlsLayout.Padding = UDim.new(0, 8)
-controlsLayout.Parent = controlsFrame
-
-local minusBtn = Instance.new("TextButton")
-minusBtn.Size = UDim2.new(0, 46, 0, 40)
-minusBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 36)
-minusBtn.BorderSizePixel = 0
-minusBtn.Text = "−"
-minusBtn.TextSize = 22
-minusBtn.Font = Enum.Font.GothamBold
-minusBtn.TextColor3 = Color3.fromRGB(200, 200, 220)
-minusBtn.AutoButtonColor = false
-minusBtn.Parent = controlsFrame
-Instance.new("UICorner", minusBtn).CornerRadius = UDim.new(0, 12)
-
-local flyToggleBtn = Instance.new("TextButton")
-flyToggleBtn.Size = UDim2.new(0, 80, 0, 40)
-flyToggleBtn.BackgroundColor3 = Color3.fromRGB(99, 82, 255)
-flyToggleBtn.BorderSizePixel = 0
-flyToggleBtn.Text = "Fly"
-flyToggleBtn.TextSize = 14
-flyToggleBtn.Font = Enum.Font.GothamBold
-flyToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-flyToggleBtn.AutoButtonColor = false
-flyToggleBtn.Parent = controlsFrame
-Instance.new("UICorner", flyToggleBtn).CornerRadius = UDim.new(0, 12)
-
-local plusBtn = Instance.new("TextButton")
-plusBtn.Size = UDim2.new(0, 46, 0, 40)
-plusBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 36)
-plusBtn.BorderSizePixel = 0
-plusBtn.Text = "+"
-plusBtn.TextSize = 22
-plusBtn.Font = Enum.Font.GothamBold
-plusBtn.TextColor3 = Color3.fromRGB(200, 200, 220)
-plusBtn.AutoButtonColor = false
-plusBtn.Parent = controlsFrame
-Instance.new("UICorner", plusBtn).CornerRadius = UDim.new(0, 12)
+local speedBarStroke = Instance.new("UIStroke")
+speedBarStroke.Thickness = 2
+speedBarStroke.Color = Color3.fromRGB(255, 0, 0)
+speedBarStroke.Parent = speedBar
 
 local speedLabel = Instance.new("TextLabel")
-speedLabel.Size = UDim2.new(1, -10, 0, 18)
-speedLabel.Position = UDim2.new(0, 5, 1, -20)
+speedLabel.Size = UDim2.new(0, 70, 1, 0)
+speedLabel.Position = UDim2.new(0, 10, 0, 0)
 speedLabel.BackgroundTransparency = 1
-speedLabel.Text = "Speed: " .. flySpeed
-speedLabel.TextColor3 = Color3.fromRGB(120, 120, 150)
-speedLabel.TextSize = 11
-speedLabel.Font = Enum.Font.Gotham
-speedLabel.TextXAlignment = Enum.TextXAlignment.Center
-speedLabel.Parent = rightPanel
+speedLabel.Text = "Speed:"
+speedLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+speedLabel.TextSize = 13
+speedLabel.Font = Enum.Font.GothamBold
+speedLabel.TextXAlignment = Enum.TextXAlignment.Left
+speedLabel.Parent = speedBar
 
-local miniFlyBtn = Instance.new("TextButton")
-miniFlyBtn.Size = UDim2.new(0, 52, 0, 52)
-miniFlyBtn.Position = mainFrame.Position
-miniFlyBtn.BackgroundColor3 = Color3.fromRGB(99, 82, 255)
-miniFlyBtn.BorderSizePixel = 0
-miniFlyBtn.Text = "⚡"
-miniFlyBtn.TextSize = 20
-miniFlyBtn.Font = Enum.Font.GothamBold
-miniFlyBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-miniFlyBtn.AutoButtonColor = false
-miniFlyBtn.Visible = false
-miniFlyBtn.Parent = screenGui
-Instance.new("UICorner", miniFlyBtn).CornerRadius = UDim.new(0, 16)
+local speedBox = Instance.new("TextBox")
+speedBox.Size = UDim2.new(0, 90, 0, 30)
+speedBox.Position = UDim2.new(0, 72, 0.5, -15)
+speedBox.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
+speedBox.BorderSizePixel = 0
+speedBox.Text = tostring(FLY_SPEED)
+speedBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+speedBox.TextSize = 14
+speedBox.Font = Enum.Font.GothamBold
+speedBox.PlaceholderText = "Speed"
+speedBox.PlaceholderColor3 = Color3.fromRGB(110, 110, 120)
+speedBox.ClearTextOnFocus = true
+speedBox.Parent = speedBar
 
-local miniFlyStroke = Instance.new("UIStroke")
-miniFlyStroke.Color = Color3.fromRGB(99, 82, 255)
-miniFlyStroke.Thickness = 2
-miniFlyStroke.Parent = miniFlyBtn
+local speedBoxCorner = Instance.new("UICorner")
+speedBoxCorner.CornerRadius = UDim.new(0, 8)
+speedBoxCorner.Parent = speedBox
 
-local function updateFlyBtnState()
-	if flying then
-		flyToggleBtn.BackgroundColor3 = Color3.fromRGB(60, 200, 120)
-		flyToggleBtn.Text = "Stop"
-		miniFlyBtn.BackgroundColor3 = Color3.fromRGB(60, 200, 120)
+local speedBoxStroke = Instance.new("UIStroke")
+speedBoxStroke.Thickness = 1.5
+speedBoxStroke.Color = Color3.fromRGB(90, 90, 110)
+speedBoxStroke.Parent = speedBox
+
+local setBtn = Instance.new("TextButton")
+setBtn.Size = UDim2.new(0, 36, 0, 30)
+setBtn.Position = UDim2.new(0, 168, 0.5, -15)
+setBtn.BackgroundColor3 = Color3.fromRGB(30, 100, 200)
+setBtn.Text = "Set"
+setBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+setBtn.TextSize = 12
+setBtn.Font = Enum.Font.GothamBold
+setBtn.AutoButtonColor = false
+setBtn.Parent = speedBar
+
+local setBtnCorner = Instance.new("UICorner")
+setBtnCorner.CornerRadius = UDim.new(0, 8)
+setBtnCorner.Parent = setBtn
+
+local function applySpeed()
+	local val = tonumber(speedBox.Text)
+	if val and val > 0 then
+		FLY_SPEED = val
+		speedBox.Text = tostring(val)
+		speedBoxStroke.Color = Color3.fromRGB(80, 255, 80)
+		task.delay(0.5, function()
+			speedBoxStroke.Color = Color3.fromRGB(90, 90, 110)
+		end)
 	else
-		flyToggleBtn.BackgroundColor3 = Color3.fromRGB(99, 82, 255)
-		flyToggleBtn.Text = "Fly"
-		miniFlyBtn.BackgroundColor3 = Color3.fromRGB(99, 82, 255)
+		speedBoxStroke.Color = Color3.fromRGB(255, 60, 60)
+		speedBox.Text = tostring(FLY_SPEED)
+		task.delay(0.5, function()
+			speedBoxStroke.Color = Color3.fromRGB(90, 90, 110)
+		end)
 	end
 end
 
-local function makeDraggable(frame)
-	local dragging = false
-	local dragStart = nil
-	local startPos = nil
+setBtn.TouchTap:Connect(applySpeed)
+speedBox.FocusLost:Connect(function(enter)
+	if enter then applySpeed() end
+end)
 
-	frame.InputBegan:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.Touch then
-			dragging = true
-			dragStart = input.Position
-			startPos = frame.Position
-		end
-	end)
+local titleBar = Instance.new("Frame")
+titleBar.Size = UDim2.new(1, 0, 0, 36)
+titleBar.Position = UDim2.new(0, 0, 0, 0)
+titleBar.BackgroundTransparency = 1
+titleBar.Parent = mainFrame
 
-	frame.InputChanged:Connect(function(input)
-		if dragging and input.UserInputType == Enum.UserInputType.Touch then
-			local delta = input.Position - dragStart
-			frame.Position = UDim2.new(
-				startPos.X.Scale,
-				startPos.X.Offset + delta.X,
-				startPos.Y.Scale,
-				startPos.Y.Offset + delta.Y
-			)
-		end
-	end)
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -90, 1, 0)
+title.Position = UDim2.new(0, 12, 0, 0)
+title.BackgroundTransparency = 1
+title.Text = "✈ MOBILE FLY"
+title.TextColor3 = Color3.fromRGB(255, 80, 80)
+title.TextSize = 15
+title.Font = Enum.Font.GothamBold
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Parent = titleBar
 
-	frame.InputEnded:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.Touch then
-			dragging = false
-		end
-	end)
+local plusBtn = Instance.new("TextButton")
+plusBtn.Size = UDim2.new(0, 26, 0, 26)
+plusBtn.Position = UDim2.new(1, -88, 0.5, -13)
+plusBtn.BackgroundColor3 = Color3.fromRGB(30, 100, 200)
+plusBtn.Text = "+"
+plusBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+plusBtn.TextSize = 18
+plusBtn.Font = Enum.Font.GothamBold
+plusBtn.AutoButtonColor = false
+plusBtn.Parent = titleBar
+
+local plusCorner = Instance.new("UICorner")
+plusCorner.CornerRadius = UDim.new(0, 8)
+plusCorner.Parent = plusBtn
+
+local collapseBtn = Instance.new("TextButton")
+collapseBtn.Size = UDim2.new(0, 26, 0, 26)
+collapseBtn.Position = UDim2.new(1, -58, 0.5, -13)
+collapseBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+collapseBtn.Text = "−"
+collapseBtn.TextColor3 = Color3.fromRGB(200, 200, 220)
+collapseBtn.TextSize = 18
+collapseBtn.Font = Enum.Font.GothamBold
+collapseBtn.AutoButtonColor = false
+collapseBtn.Parent = titleBar
+
+local collapseCorner = Instance.new("UICorner")
+collapseCorner.CornerRadius = UDim.new(0, 8)
+collapseCorner.Parent = collapseBtn
+
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.new(0, 26, 0, 26)
+closeBtn.Position = UDim2.new(1, -30, 0.5, -13)
+closeBtn.BackgroundColor3 = Color3.fromRGB(190, 40, 50)
+closeBtn.Text = "×"
+closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeBtn.TextSize = 16
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.AutoButtonColor = false
+closeBtn.Parent = titleBar
+
+local closeCorner = Instance.new("UICorner")
+closeCorner.CornerRadius = UDim.new(0, 8)
+closeCorner.Parent = closeBtn
+
+local divider = Instance.new("Frame")
+divider.Size = UDim2.new(1, -20, 0, 1)
+divider.Position = UDim2.new(0, 10, 0, 36)
+divider.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+divider.BorderSizePixel = 0
+divider.Parent = mainFrame
+
+local bodyContainer = Instance.new("Frame")
+bodyContainer.Size = UDim2.new(1, 0, 1, -37)
+bodyContainer.Position = UDim2.new(0, 0, 0, 37)
+bodyContainer.BackgroundTransparency = 1
+bodyContainer.ClipsDescendants = true
+bodyContainer.Parent = mainFrame
+
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Size = UDim2.new(0, 100, 0, 45)
+toggleBtn.Position = UDim2.new(0.5, -50, 0, 10)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(55, 18, 18)
+toggleBtn.Text = "OFF"
+toggleBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+toggleBtn.TextSize = 18
+toggleBtn.Font = Enum.Font.GothamBold
+toggleBtn.AutoButtonColor = false
+toggleBtn.Parent = bodyContainer
+
+local btnCorner = Instance.new("UICorner")
+btnCorner.CornerRadius = UDim.new(0, 12)
+btnCorner.Parent = toggleBtn
+
+local btnStroke = Instance.new("UIStroke")
+btnStroke.Thickness = 2
+btnStroke.Color = Color3.fromRGB(255, 60, 60)
+btnStroke.Parent = toggleBtn
+
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Size = UDim2.new(1, -20, 0, 24)
+statusLabel.Position = UDim2.new(0, 10, 0, 62)
+statusLabel.BackgroundTransparency = 1
+statusLabel.Text = "Tap to Enable"
+statusLabel.TextColor3 = Color3.fromRGB(170, 170, 170)
+statusLabel.TextSize = 12
+statusLabel.Font = Enum.Font.Gotham
+statusLabel.TextXAlignment = Enum.TextXAlignment.Center
+statusLabel.Parent = bodyContainer
+
+local function tweenProp(obj, goal)
+	TweenService:Create(obj, TweenInfo.new(0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), goal):Play()
 end
 
-makeDraggable(mainFrame)
-makeDraggable(miniFlyBtn)
-
 local collapsed = false
+local EXPANDED_H = 148
+local COLLAPSED_H = 40
 
 collapseBtn.TouchTap:Connect(function()
 	collapsed = not collapsed
 	if collapsed then
-		TweenService:Create(mainFrame, TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
-			Size = UDim2.new(0, 240, 0, 44)
-		}):Play()
-		controlsFrame.Visible = false
-		speedLabel.Visible = false
+		tweenProp(mainFrame, { Size = UDim2.new(0, 220, 0, COLLAPSED_H) })
 		collapseBtn.Text = "+"
+		speedBar.Visible = false
 	else
-		controlsFrame.Visible = true
-		speedLabel.Visible = true
-		TweenService:Create(mainFrame, TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
-			Size = UDim2.new(0, 240, 0, 120)
-		}):Play()
+		tweenProp(mainFrame, { Size = UDim2.new(0, 220, 0, EXPANDED_H) })
 		collapseBtn.Text = "−"
 	end
 end)
 
+local speedBarVisible = false
+plusBtn.TouchTap:Connect(function()
+	if collapsed then return end
+	speedBarVisible = not speedBarVisible
+	speedBar.Visible = speedBarVisible
+	tweenProp(plusBtn, {
+		BackgroundColor3 = speedBarVisible
+			and Color3.fromRGB(60, 180, 60)
+			or Color3.fromRGB(30, 100, 200)
+	})
+end)
+
 closeBtn.TouchTap:Connect(function()
 	mainFrame.Visible = false
-	stopFly()
-	updateFlyBtnState()
+	if flying then
+		flying = false
+		local char = player.Character
+		if char and char:FindFirstChild("Humanoid") then
+			char.Humanoid.PlatformStand = false
+		end
+		if bodyGyro then bodyGyro:Destroy() end
+		if bodyVelocity then bodyVelocity:Destroy() end
+	end
 end)
 
-flyToggleBtn.TouchTap:Connect(function()
+local dragging = false
+local dragStart, startPos
+
+mainFrame.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.Touch then
+		dragging = true
+		dragStart = input.Position
+		startPos = mainFrame.Position
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	if dragging and input.UserInputType == Enum.UserInputType.Touch then
+		local delta = input.Position - dragStart
+		mainFrame.Position = UDim2.new(
+			startPos.X.Scale, startPos.X.Offset + delta.X,
+			startPos.Y.Scale, startPos.Y.Offset + delta.Y
+		)
+	end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.Touch then
+		dragging = false
+	end
+end)
+
+local function startFly()
+	local character = player.Character
+	if not character then return end
+	local humanoid = character:FindFirstChild("Humanoid")
+	local root = character:FindFirstChild("HumanoidRootPart")
+	if not humanoid or not root then return end
+
+	flying = true
+	humanoid.PlatformStand = true
+
+	bodyGyro = Instance.new("BodyGyro")
+	bodyGyro.MaxTorque = Vector3.new(4e5, 4e5, 4e5)
+	bodyGyro.P = 3000
+	bodyGyro.Parent = root
+
+	bodyVelocity = Instance.new("BodyVelocity")
+	bodyVelocity.MaxForce = Vector3.new(4e5, 4e5, 4e5)
+	bodyVelocity.Velocity = Vector3.zero
+	bodyVelocity.Parent = root
+
+	toggleBtn.Text = "ON"
+	tweenProp(toggleBtn, {
+		BackgroundColor3 = Color3.fromRGB(18, 110, 18),
+		TextColor3 = Color3.fromRGB(255, 255, 255),
+	})
+	statusLabel.Text = "FLYING ACTIVE ✓"
+	statusLabel.TextColor3 = Color3.fromRGB(90, 255, 90)
+end
+
+local function stopFly()
+	flying = false
+	local character = player.Character
+	if character and character:FindFirstChild("Humanoid") then
+		character.Humanoid.PlatformStand = false
+	end
+	if bodyGyro then bodyGyro:Destroy() end
+	if bodyVelocity then bodyVelocity:Destroy() end
+
+	toggleBtn.Text = "OFF"
+	tweenProp(toggleBtn, {
+		BackgroundColor3 = Color3.fromRGB(55, 18, 18),
+		TextColor3 = Color3.fromRGB(200, 200, 200),
+	})
+	statusLabel.Text = "Tap to Enable"
+	statusLabel.TextColor3 = Color3.fromRGB(170, 170, 170)
+end
+
+toggleBtn.TouchTap:Connect(function()
 	if flying then stopFly() else startFly() end
-	updateFlyBtnState()
 end)
 
-minusBtn.TouchTap:Connect(function()
-	flySpeed = math.max(10, flySpeed - 10)
-	speedLabel.Text = "Speed: " .. flySpeed
+local chromaHue = 0
+RunService.RenderStepped:Connect(function(dt)
+	chromaHue = (chromaHue + dt * 0.28) % 1
+	local c = Color3.fromHSV(chromaHue, 1, 1)
+	mainStroke.Color = c
+	speedBarStroke.Color = c
+	if not flying then
+		btnStroke.Color = c
+	end
+
+	if flying then
+		local character = player.Character
+		local root = character and character:FindFirstChild("HumanoidRootPart")
+		local humanoid = character and character:FindFirstChild("Humanoid")
+		local cam = workspace.CurrentCamera
+
+		if root and humanoid and cam and bodyVelocity and bodyGyro then
+			local moveVec = ControlModule and ControlModule:GetMoveVector() or Vector3.zero
+			local vertBoost = humanoid.Jump and (FLY_SPEED * BOOST_MULT) or 0
+
+			bodyVelocity.Velocity =
+				cam.CFrame.RightVector * (moveVec.X * FLY_SPEED) +
+				cam.CFrame.LookVector * (-moveVec.Z * FLY_SPEED) +
+				Vector3.new(0, vertBoost, 0)
+
+			bodyGyro.CFrame = cam.CFrame
+		end
+	end
 end)
 
-plusBtn.TouchTap:Connect(function()
-	flySpeed = math.min(500, flySpeed + 10)
-	speedLabel.Text = "Speed: " .. flySpeed
-end)
-
-quickBtn.TouchTap:Connect(function()
-	if not flying then startFly() end
-	updateFlyBtnState()
-	miniFlyBtn.Position = mainFrame.Position
-	mainFrame.Visible = false
-	miniFlyBtn.Visible = true
-end)
-
-miniFlyBtn.TouchTap:Connect(function()
-	if flying then stopFly() else startFly() end
-	updateFlyBtnState()
-end)
-
-miniFlyBtn.TouchLongPress:Connect(function()
-	mainFrame.Position = miniFlyBtn.Position
-	mainFrame.Visible = true
-	miniFlyBtn.Visible = false
+player.CharacterAdded:Connect(function()
+	task.wait(0.5)
+	if flying then startFly() end
 end)
